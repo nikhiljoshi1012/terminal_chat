@@ -2,6 +2,16 @@ import type { Message, ModelInfo } from "./types.ts";
 
 const BASE = process.env.OLLAMA_HOST || "http://127.0.0.1:11434";
 
+// ponytail: name-based heuristic for thinking support. Conservative: only known
+// thinking families get `think:true`; unknown models stay off so we never 400
+// on the think flag. Upgrade path: probe /api/show capabilities once Ollama
+// stabilises a thinking-capability field across versions.
+const THINKING_PATTERN =
+  /^(qwen3|qwq|deepseek-r1|r1-|nemotron-?nvl?|rumi|gpt-oss|apertus|phi4-reasoning|orca-mini-)/i;
+export function supportsThinking(model: string): boolean {
+  return THINKING_PATTERN.test(model.split(":")[0]);
+}
+
 export async function checkConnection(): Promise<boolean> {
   try {
     const r = await fetch(`${BASE}/api/tags`, {
@@ -84,7 +94,7 @@ export async function chatStream(
     body: JSON.stringify({
       model,
       stream: true,
-      think: true,
+      think: supportsThinking(model),
       messages: payload.map(toApi),
     }),
     signal,

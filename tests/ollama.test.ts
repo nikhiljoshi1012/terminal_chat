@@ -1,5 +1,19 @@
 import { test, expect, describe, beforeEach, afterEach } from "bun:test"
 import type { Message } from "../src/types.ts"
+import { supportsThinking } from "../src/ollama.ts"
+
+describe("ollama.supportsThinking", () => {
+  test("known thinking families return true", () => {
+    expect(supportsThinking("qwen3:4b")).toBe(true)
+    expect(supportsThinking("qwq:32b")).toBe(true)
+    expect(supportsThinking("deepseek-r1:8b")).toBe(true)
+  })
+  test("non-thinking models return false", () => {
+    expect(supportsThinking("gemma3:4b")).toBe(false)
+    expect(supportsThinking("llama3.2:3b")).toBe(false)
+    expect(supportsThinking("mistral:7b")).toBe(false)
+  })
+})
 
 // ponytail: mock global fetch; restore after each test
 const realFetch = globalThis.fetch

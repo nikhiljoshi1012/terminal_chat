@@ -34,6 +34,14 @@ const mdStyle = SyntaxStyle.fromStyles({
   default: { fg: RGBA.fromHex(colors.text) },
 })
 
+// ponytail: faded grey style for thinking blocks so they read as reasoned-away
+// scratch, not part of the answer. Italic + uniform grey across markup kinds.
+const thinkStyle = SyntaxStyle.fromStyles({
+  default: { fg: RGBA.fromHex(colors.dim), italic: true },
+  "markup.bold": { bold: true },
+  "markup.italic": { italic: true },
+})
+
 export class App {
   renderer: CliRenderer
   host: BoxRenderable
@@ -350,7 +358,10 @@ export class App {
       void this.send(text)
     })
     frame.add(input)
-    frame.add(this.footer(["Enter Send", "PgUp/PgDn Scroll", "Ctrl+T Thinking", "Esc Back/Stop", "Ctrl+C Exit"]))
+    const hints = ["Enter Send", "PgUp/PgDn Scroll"]
+    if (ollama.supportsThinking(s.model)) hints.push("Ctrl+T Thinking")
+    hints.push("Esc Back/Stop", "Ctrl+C Exit")
+    frame.add(this.footer(hints))
     input.focus()
     this.host.add(frame)
   }
@@ -364,7 +375,7 @@ export class App {
     const who = m.role === "user" ? "You" : "Assistant"
     row.add(new TextRenderable(this.renderer, { id: "m-who", content: who, fg: m.role === "user" ? colors.accent : colors.primary }))
     if (m.role === "assistant") {
-      if (m.thinking) {
+      if (m.thinking && this.current && ollama.supportsThinking(this.current.model)) {
         const toggle = new TextRenderable(this.renderer, {
           id: "m-think-toggle",
           content: this.showThinking ? "▼ Thinking" : "▶ Thinking",
@@ -376,7 +387,7 @@ export class App {
           id: "m-think-md",
           width: "100%",
           content: m.thinking,
-          syntaxStyle: mdStyle,
+          syntaxStyle: thinkStyle,
         })
         thinkMd.visible = this.showThinking
         this.thinkingBlocks.push(thinkMd)
@@ -455,21 +466,26 @@ export class App {
     this.throbber = throbber
     this.startThrobber()
 
-    const thinkToggle = new TextRenderable(this.renderer, {
-      id: "streamed-think-toggle",
-      content: this.showThinking ? "▼ Thinking" : "▶ Thinking",
-      fg: colors.dim,
-    })
-    const streamedThink = new MarkdownRenderable(this.renderer, {
-      id: "streamed-think",
-      width: "100%",
-      content: "",
-      syntaxStyle: mdStyle,
-      streaming: true,
-    })
-    streamedThink.visible = false
-    this.thinkingToggles.push(thinkToggle)
-    this.thinkingBlocks.push(streamedThink)
+    const canThink = ollama.supportsThinking(s.model)
+    const thinkToggle = canThink
+      ? new TextRenderable(this.renderer, {
+        id: "streamed-think-toggle",
+        content: this.showThinking ? "▼ Thinking" : "▶ Thinking",
+        fg: colors.dim,
+      })
+      : null
+    const streamedThink = canThink
+      ? new MarkdownRenderable(this.renderer, {
+        id: "streamed-think",
+        width: "100%",
+        content: "",
+        syntaxStyle: thinkStyle,
+        streaming: true,
+      })
+      : null
+    if (streamedThink) streamedThink.visible = false
+    if (thinkToggle) this.thinkingToggles.push(thinkToggle)
+    if (streamedThink) this.thinkingBlocks.push(streamedThink)
 
     const streamed = new MarkdownRenderable(this.renderer, {
       id: "streamed",
@@ -478,8 +494,8 @@ export class App {
       syntaxStyle: mdStyle,
       streaming: true,
     })
-    busyRow.add(thinkToggle)
-    busyRow.add(streamedThink)
+    if (thinkToggle) busyRow.add(thinkToggle)
+    if (streamedThink) busyRow.add(streamedThink)
     busyRow.add(streamed)
     if (scroll) scroll.add(busyRow)
     this.streamedMd = streamed
@@ -497,11 +513,13 @@ export class App {
         },
         this.abort.signal,
         ctx.system,
-        (chunk) => {
-          assistantMsg.thinking = (assistantMsg.thinking ?? "") + chunk
-          streamedThink.content = assistantMsg.thinking
-          streamedThink.visible = this.showThinking
-        },
+        canThink
+          ? (chunk) => {
+              assistantMsg.thinking = (assistantMsg.thinking ?? "") + chunk
+              if (streamedThink) streamedThink.content = assistantMsg.thinking
+              if (streamedThink) streamedThink.visible = this.showThinking
+            }
+          : undefined,
       )
       assistantMsg.content = res.content
       if (res.thinking) assistantMsg.thinking = res.thinking
@@ -519,10 +537,10 @@ export class App {
       this.stopThrobber()
       this.throbber = null
       if (this.streamedMd) this.streamedMd.streaming = false
-      streamedThink.streaming = false
+      if (streamedThink) streamedThink.streaming = false
       if (!assistantMsg.thinking) {
-        streamedThink.visible = false
-        thinkToggle.content = ""
+        if (streamedThink) streamedThink.visible = false
+        if (thinkToggle) thinkToggle.content = ""
       }
       if (assistantMsg.content) s.messages.push(assistantMsg)
       if (this.settings.autoSave) store.saveSession(s)
